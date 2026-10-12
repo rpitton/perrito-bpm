@@ -534,10 +534,11 @@
     if (mode === 'tap') return tapBpm;
     return result && result.bpm && result.state !== 'nolock' ? result.bpm : (result && result.bpm) || null;
   }
-  function locked() { return mode === 'tap' ? tapBpm != null : !!(listening && result && result.bpm && result.state !== 'nolock'); }
+  // al parar queda el último tempo enganchado: se sigue mostrando y la cola lo sigue marcando
+  function locked() { return mode === 'tap' ? tapBpm != null : !!(result && result.bpm && result.state !== 'nolock'); }
 
   function mood() {
-    if (mode !== 'mezcla' || !locked()) return 'normal';
+    if (mode !== 'mezcla' || !listening || !locked()) return 'normal';
     const s = result.state;
     if (s === 'sync') return 'happy';
     if (s === 'ahead' || s === 'behind' || s === 'drift') return 'grr';
@@ -565,7 +566,7 @@
     app.classList.toggle('listening', listening);
     app.classList.toggle('dim', !locked());
     app.classList.toggle('grr', m === 'grr' && !welcome);
-    app.classList.toggle('mixing', mode === 'mezcla' && locked() && result.mixing);
+    app.classList.toggle('mixing', mode === 'mezcla' && listening && locked() && result.mixing);
     document.querySelectorAll('.welcome').forEach(e => e.classList.toggle('hide', !welcome));
     document.querySelectorAll('.mode').forEach(e => e.classList.toggle('hide', welcome));
     $('phase').classList.toggle('hide', mode !== 'mezcla');
@@ -579,7 +580,7 @@
     hint.textContent = welcome ? '' : hintText();
 
     let want = '';
-    if (mode === 'mezcla' && locked()) want = m === 'happy' ? 'barf' : m === 'grr' ? 'grrr' : '';
+    if (mode === 'mezcla' && listening && locked()) want = m === 'happy' ? 'barf' : m === 'grr' ? 'grrr' : '';
     if (bubble.dataset.kind !== want) {
       bubble.dataset.kind = want;
       bubble.className = want;
