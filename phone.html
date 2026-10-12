@@ -116,6 +116,7 @@
  * Dos bandas:
  *  - Graves (35–150 Hz): tempo por autocorrelación y posición del bombo. Robusto, pero dos
  *    bombos superpuestos interfieren entre sí, así que no sirve para medir desfases chicos.
+ *    Si casi no hay graves (parlante chico, micrófono de teléfono), el tempo sale de los agudos.
  *  - Agudos (> 2 kHz): transientes cortos (click del bombo, hats, claps). Ahí un desfase de
  *    10–40 ms aparece como un golpe duplicado, y se mide el desfase entre A y B.
  */
@@ -203,7 +204,7 @@
     reset() {
       this.low.buf.fill(0); this.high.buf.fill(0);
       this.history = [];
-      this.result = { bpm: null, confidence: 0, levelDb: -120, state: 'nolock', offsetMs: 0, deltaBpm: 0, mixing: false, beatPhase: 0, time: this.frame / (this.fps || 1) };
+      this.result = { bpm: null, confidence: 0, levelDb: -120, state: 'nolock', offsetMs: 0, deltaBpm: 0, mixing: false, bassless: false, beatPhase: 0, time: this.frame / (this.fps || 1) };
       this.aPos = null; this.hfAPos = null; this.mixing = false; this.mixCount = 0; this.lastB = -1e9;
       this.base = new Float32Array(this.c.phaseBins); this.baseN = 0;
       this.offHist = []; this.shownState = 'nolock'; this.candState = null; this.candCount = 0;
@@ -231,13 +232,21 @@
       return updated;
     }
 
+    /** Tempo por graves; si no alcanza (parlante chico, micrófono de teléfono), prueba con los agudos. */
     _tempo() {
+      const lo = this._tempoBand(this.low, 0.5);
+      if (lo && lo.confidence >= this.c.minConfidence) return Object.assign(lo, { bassless: false });
+      const hi = this._tempoBand(this.high, 0); // hats a mitad de beat: en agudos no se penaliza el medio beat
+      return hi && (!lo || hi.confidence > lo.confidence) ? Object.assign(hi, { bassless: true }) : lo && Object.assign(lo, { bassless: false });
+    }
+
+    _tempoBand(band, halfPenalty) {
       const c = this.c, fps = this.fps;
       const n = Math.min(this.W, this.framesSinceReset);
       if (n < fps * 4) return null;
       const x = new Float32Array(n);
       let mean = 0;
-      for (let i = 0; i < n; i++) { x[i] = this.low.at(this.frame - n + i); mean += x[i]; }
+      for (let i = 0; i < n; i++) { x[i] = band.at(this.frame - n + i); mean += x[i]; }
       mean /= n;
       for (let i = 0; i < n; i++) x[i] -= mean;
       const lagMax = Math.min(n - 1, Math.ceil(4 * 60 * fps / c.bpmMin) + 2);
@@ -255,7 +264,7 @@
         const lag = 60 * fps / bpm;
         let s = 0;
         for (let k = 1; k <= 4; k++) s += Wk[k - 1] * at(k * lag);
-        s -= 0.5 * Math.max(0, at(lag / 2)); // un bombo 4/4 no tiene energía a mitad de beat
+        s -= halfPenalty * Math.max(0, at(lag / 2)); // un bombo 4/4 no tiene energía a mitad de beat
         scores.push(s);
         if (s > best) { best = s; bestBpm = bpm; }
       }
@@ -311,13 +320,14 @@
         else if (this.mixCount > 0) { /* B apareció y se está confirmando: se sostiene el último valor */ }
         else r.bpm = (r.bpm == null || Math.abs(bpm - r.bpm) > 0.05) ? bpm : r.bpm;
         r.confidence = t.confidence;
+        r.bassless = t.bassless;
 
         const P = 60 * this.fps / r.bpm, msPerBin = P / N * 1000 / this.fps;
         // el ancla avanza de a beats enteros y queda siempre cerca de "ahora": si el BPM leído
         // oscila un decimal, las posiciones en el histograma casi no se mueven
         this.anchor += Math.floor((this.frame - this.anchor) / P) * P;
-        // 1) dónde cae el bombo de A (graves), seguido por continuidad
-        const lowH = this._fold(this.low, P);
+        // 1) dónde cae el bombo de A (graves; sin graves, el golpe principal en agudos), seguido por continuidad
+        const lowH = this._fold(t.bassless ? this.high : this.low, P);
         let maxI = 0; for (let i = 1; i < N; i++) if (lowH[i] > lowH[maxI]) maxI = i;
         const lowMain = PerritoEngine._peakNear(lowH, maxI, 1);
         const near = Math.max(2, Math.round(c.syncMs * 1.5 / msPerBin));
@@ -327,6 +337,11 @@
           if (p.v > 0.25 * lowMain.v) this.aPos = p.pos;
         }
 
+        if (t.bassless) {
+          // sin graves no se puede separar a B de A: no hay detección de mezcla
+          this.mixCount = 0; this.offHist = []; this.mixing = false; this.bpmA = null; this.baseN = 0; this.hfAPos = null;
+          raw = 'solo'; r.offsetMs = 0;
+        } else {
         // 2) transientes alineados al bombo de A, comparados con el perfil aprendido de A
         const hiH = this._fold(this.high, P);
         // el click de A se sigue en agudos con radio chico: si B está cerca, no lo confunde
@@ -390,6 +405,7 @@
           }
           raw = this.mixing ? 'sync' : 'solo';
           r.offsetMs = 0;
+        }
         }
         // fase del beat "ahora": 0 = cae el bombo de A
         r.beatPhase = wrap(wrap(this.frame - this.anchor, P) / P - this.aPos / N, 1);
@@ -536,6 +552,7 @@
     if (!listening) return 'tocá ▶ para escuchar';
     if (!result || !locked()) return result && result.levelDb > -3 ? 'muy fuerte · alejá el teléfono' : 'buscando el bombo…';
     if (mode === 'bpm') return result.levelDb > -3 ? 'muy fuerte · alejá el teléfono' : '';
+    if (result.bassless) return 'pocos graves · sin MEZCLA';
     const s = result.state, ms = Math.round(Math.abs(result.offsetMs));
     if (s === 'ahead') return `B +${ms} ms · frená`;
     if (s === 'behind') return `B −${ms} ms · empujá`;
@@ -622,6 +639,8 @@
     const now = performance.now();
     if (now - lastSide < 300 || now - lastLong < 400) return;   // doble evento / suelta de un mantener
     lastSide = now;
+    // al empezar a escuchar se pasa a BPM (desde la bienvenida o TAP no se ve el tempo); en MEZCLA se queda
+    if (!listening && (mode === 'pl' || mode === 'tap')) setMode('bpm');
     listening ? stopListening() : startListening();
   }
   function longPress() {
@@ -897,7 +916,7 @@
   }
   // versión visible al cargar: si no aparece, Safari está mostrando una copia vieja
   const ios = (/OS (\d+)_(\d+)/.exec(navigator.userAgent) || []).slice(1).join('.');
-  if (P) say(`versión 10-12 19:11${ios ? ' · iOS ' + ios : ''} · tocá ▶ escuchar`);
+  if (P) say(`versión 10-12 19:18${ios ? ' · iOS ' + ios : ''} · tocá ▶ escuchar`);
   else say(`La app no cargó: ${(window.__errs || []).join(' · ') || 'sin detalle'}`, true);
 })();
 </script>
