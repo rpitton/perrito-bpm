@@ -700,6 +700,8 @@
   #reset{font:inherit;font-weight:700;font-size:14px;padding:0 18px;border:2px solid var(--ink);border-radius:12px;
     background:transparent;color:var(--ink)}
   #pad button:active{transform:scale(.97)}
+  #status{min-height:18px;margin:-2px 0 0;text-align:center;font-weight:700;font-size:13px;line-height:1.35}
+  #status.err{color:#a1001b}
 </style>
 <div id="pad">
   <div id="tabs">
@@ -709,6 +711,7 @@
     <button class="big" id="listen">▶ escuchar</button>
     <button id="reset">reset</button>
   </div>
+  <p id="status"></p>
 </div>
 <script>
 (() => {
@@ -737,10 +740,33 @@
   let wake = null;
   listen.addEventListener('click', () => {
     const was = P.state.listening;
+    if (!was && !(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia))
+      return say('Este navegador no deja usar el micrófono. Abrí el link en Safari (no desde WhatsApp, Instagram, etc.).', true);
     P.sideClick();
     if (!was && navigator.wakeLock) navigator.wakeLock.request('screen').then(w => { wake = w; }).catch(() => {});
     if (was && wake) { wake.release().catch(() => {}); wake = null; }
+    if (!was) { say('pidiendo el micrófono…'); clearTimeout(diag); diag = setTimeout(diagnose, 3000); }
+    else say('');
   });
+
+  // estado visible abajo: la app solo muestra un aviso de 1 s y no dice por qué falló
+  const status = document.getElementById('status');
+  function say(t, err) { status.textContent = t; status.classList.toggle('err', !!err); }
+  let diag = null;
+  async function diagnose() {
+    if (P.state.listening) return say('escuchando');
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach(t => t.stop());
+      say('El micrófono anda pero el audio no arrancó. Tocá el perrito una vez y probá de nuevo.', true);
+    } catch (e) {
+      say(e && e.name === 'NotAllowedError'
+        ? 'Sin permiso de micrófono. En Safari: aA (barra de dirección) › Configuración del sitio › Micrófono › Permitir. Después recargá.'
+        : `No se pudo abrir el micrófono (${e && e.name || e}).`, true);
+    }
+  }
+  addEventListener('error', e => say(`error: ${e.message}`, true));
+  addEventListener('unhandledrejection', e => say(`error: ${(e.reason && (e.reason.message || e.reason.name)) || e.reason}`, true));
   document.getElementById('reset').addEventListener('click', () => P.longPress());
 
   // deslizar sobre el perrito = girar la ruedita
@@ -758,6 +784,7 @@
     document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === st.mode));
     listen.textContent = st.listening ? '■ parar' : '▶ escuchar';
     listen.classList.toggle('on', st.listening);
+    if (st.listening && status.textContent === 'pidiendo el micrófono…') say('escuchando');
     document.documentElement.style.setProperty('--page', getComputedStyle(app).getPropertyValue('--bg'));
   }
   setInterval(sync, 200); sync();

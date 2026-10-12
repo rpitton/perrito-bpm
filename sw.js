@@ -1,6 +1,6 @@
 // perrito BPM — cacheo offline.
 // La primera apertura (con internet) guarda la app; después abre desde el caché, sin conexión.
-const CACHE = 'perrito-bpm-328f60a6';
+const CACHE = 'perrito-bpm-f117fa0f';
 const FILES = ['./', './index.html'];
 
 self.addEventListener('install', e => {
