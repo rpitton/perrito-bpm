@@ -873,7 +873,7 @@
   }
   // versión visible al cargar: si no aparece, Safari está mostrando una copia vieja
   const ios = (/OS (\d+)_(\d+)/.exec(navigator.userAgent) || []).slice(1).join('.');
-  if (P) say(`versión 10-12 19:03${ios ? ' · iOS ' + ios : ''} · tocá ▶ escuchar`);
+  if (P) say(`versión 10-12 19:09${ios ? ' · iOS ' + ios : ''} · tocá ▶ escuchar`);
   else say(`La app no cargó: ${(window.__errs || []).join(' · ') || 'sin detalle'}`, true);
 })();
 </script>

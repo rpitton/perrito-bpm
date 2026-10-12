@@ -1,6 +1,6 @@
 // perrito BPM — cacheo offline.
-// La primera apertura (con internet) guarda la app; después abre desde el caché, sin conexión.
-const CACHE = 'perrito-bpm-f421aae7';
+// La primera apertura (con internet) guarda la app; después, sin conexión, abre desde el caché.
+const CACHE = 'perrito-bpm-c5fc6152';
 const FILES = ['./', './index.html'];
 
 self.addEventListener('install', e => {
@@ -13,12 +13,16 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 
-// Caché primero (ignorando ?v=N); si no está, red; si no hay red, la app cacheada.
+// Red primero: con internet siempre abre la última versión y actualiza la copia guardada.
+// Sin red (o si tarda más de 3 s, como en una cabina con mala señal), abre la copia guardada (ignorando ?v=N).
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request)
-      .then(res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return res; })
-      .catch(() => caches.match('./index.html')))
-  );
+  const cached = () => caches.match(e.request, { ignoreSearch: true })
+    .then(hit => hit || caches.match('./index.html'))
+    .then(hit => hit || Promise.reject(new Error('sin red y sin copia guardada')));
+  const net = fetch(e.request).then(res => {
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request.url.split('?')[0], copy)); }
+    return res;
+  });
+  e.respondWith(Promise.race([net, new Promise((_, no) => setTimeout(no, 3000))]).catch(() => cached().catch(() => net)));
 });
