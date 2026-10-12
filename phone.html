@@ -727,6 +727,13 @@
   const pad = document.getElementById('pad'), listen = document.getElementById('listen');
   const MODES = ['pl', 'bpm', 'mezcla', 'tap'];
 
+  // la app usa este AudioContext: así se puede ver su estado y reanudarlo con cualquier toque
+  let actx = null;
+  if (P) P.createContext = () => (actx = new (window.AudioContext || window.webkitAudioContext)());
+  document.addEventListener('touchend', () => {
+    if (actx && actx.state !== 'running' && actx.state !== 'closed') actx.resume().catch(() => {});
+  }, { passive: true });
+
   // Si el pedido con opciones (sin cancelación de eco, mono, etc.) no contesta, se pide el micrófono simple.
   // Con el simple el iPhone aplica su procesamiento de voz: la lectura puede empeorar, pero arranca.
   const md = navigator.mediaDevices;
@@ -814,13 +821,18 @@
     if (st.listening) pending = false;
     listen.textContent = st.listening ? '■ parar' : pending ? 'pidiendo micrófono…' : '▶ escuchar';
     listen.classList.toggle('on', st.listening);
-    if (st.listening && status.textContent === 'pidiendo el micrófono…') say('escuchando');
+    // mientras escucha, qué recibe: estado del audio, nivel del micrófono y segundos analizados
+    if (st.listening) {
+      const r = st.result, a = actx ? `audio ${actx.state} · ${actx.sampleRate} Hz` : 'audio ?';
+      say(`escuchando · ${a} · ${r ? `nivel ${Math.round(r.levelDb)} dB · ${Math.round(r.time)} s · ${r.state}` : 'no llegan datos del micrófono'}`,
+        !r || (actx && actx.state !== 'running'));
+    }
     document.documentElement.style.setProperty('--page', getComputedStyle(app).getPropertyValue('--bg'));
   }
   setInterval(sync, 200); sync();
   // versión visible al cargar: si no aparece, Safari está mostrando una copia vieja
   const ios = (/OS (\d+)_(\d+)/.exec(navigator.userAgent) || []).slice(1).join('.');
-  if (P) say(`versión 10-12 18:54${ios ? ' · iOS ' + ios : ''} · tocá ▶ escuchar`);
+  if (P) say(`versión 10-12 18:57${ios ? ' · iOS ' + ios : ''} · tocá ▶ escuchar`);
   else say(`La app no cargó: ${(window.__errs || []).join(' · ') || 'sin detalle'}`, true);
 })();
 </script>
